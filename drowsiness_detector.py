@@ -1,14 +1,25 @@
+# drowsiness_detector.py
 import cv2
-import dlib
-from eye_aspect_ratio import eye_aspect_ratio
-from facial_landmarks import detect_facial_landmarks
+from ear_calculator import eye_aspect_ratio
+from alert_system import trigger_alert
+from facial_landmarks import get_landmarks
+from datetime import datetime
+import time
 
-# Initialize dlib's face detector and the facial landmarks predictor
-detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("models/shape_predictor_68_face_landmarks.dat")
+# Threshold for EAR below which the eye is considered closed
+EAR_THRESHOLD = 0.3
+# Number of consecutive frames the eye must be below the threshold to trigger the alert
+EYE_CLOSED_FRAMES = 48
+# Time to wait before re-checking after an alert has been triggered (in seconds)
+ALERT_COOLDOWN = 300
 
-# Start video capture
+# Initialize the video capture object
 cap = cv2.VideoCapture(0)
+
+# Variables to keep track of blinking
+frame_counter = 0
+alert_triggered = False
+last_alert_time = datetime.min
 
 while True:
     # Capture frame-by-frame
@@ -16,31 +27,41 @@ while True:
     if not ret:
         break
 
-    # Detect faces in the grayscale frame
-    faces = detector(frame, 0)
+    # Get the facial landmarks
+    landmarks = get_landmarks(frame)
 
-    # Loop over each face found
-    for face in faces:
-        landmarks = detect_facial_landmarks(frame, face, predictor)
+    # Proceed if facial landmarks are detected
+    if landmarks:
+        # Assume landmarks[36:42] are the coordinates for the right eye,
+        # and landmarks[42:48] are for the left eye
+        right_eye_ear = eye_aspect_ratio(landmarks[36:42])
+        left_eye_ear = eye_aspect_ratio(landmarks[42:48])
+        ear = (right_eye_ear + left_eye_ear) / 2.0
 
-        # Compute the eye aspect ratio for both eyes
-        left_eye_ear = eye_aspect_ratio(landmarks['left_eye'])
-        right_eye_ear = eye_aspect_ratio(landmarks['right_eye'])
-        ear = (left_eye_ear + right_eye_ear) / 2.0
+        # Check if EAR is below the threshold
+        if ear < EAR_THRESHOLD:
+            frame_counter += 1
 
-        # Check if the eye aspect ratio is below the blink threshold
-        if ear < EYE_AR_THRESH:
-            # Driver might be drowsy, take necessary actions
-            cv2.putText(frame, "DROWSINESS ALERT!", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            # If eyes are closed long enough, trigger the alert
+            if frame_counter >= EYE_CLOSED_FRAMES and not alert_triggered and (datetime.now() - last_alert_time).total_seconds() > ALERT_COOLDOWN:
+                trigger_alert()
+                alert_triggered = True
+                last_alert_time = datetime.now()
+        else:
+            frame_counter = 0
+            alert_triggered = False
 
     # Display the resulting frame
     cv2.imshow('Frame', frame)
 
-    # Break the loop if 'q' is pressed
+    # Press 'q' to exit the loop
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Release the capture
+# When everything done, release the capture
 cap.release()
 cv2.destroyAllWindows()
+
+# The drowsiness_detector.py integrates real-time video capture, facial landmark detection,
+# EAR calculation, drowsiness detection logic, and alert system. It is the central part of the
+# Driver Drowsiness Detection System.
